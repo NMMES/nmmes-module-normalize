@@ -6,6 +6,15 @@ A normalization module for nmmes-backend.
 
 - [nmmes-backend](https://github.com/NMMES/nmmes-backend) - Required in order to run this module.
 
+### Installation
+
+```
+npm install -S nmmes-module-normalize
+yarn add nmmes-module-normalize
+```
+
+You may install via npm or yarn.
+
 ## Usage
 
 You will need to install the encoder module (`nmmes-module-encoder`) for this example.
