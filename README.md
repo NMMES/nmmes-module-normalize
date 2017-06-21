@@ -6,14 +6,9 @@ A normalization module for nmmes-backend.
 
 - [nmmes-backend](https://github.com/NMMES/nmmes-backend) - Required in order to run this module.
 
-### Installation
+## Installation
 
-```
-npm install -S nmmes-module-normalize
-yarn add nmmes-module-normalize
-```
-
-You may install via npm or yarn.
+[![NPM](https://nodei.co/npm/nmmes-module-normalize.png?compact=true)](https://nodei.co/npm/nmmes-module-normalize/)
 
 ## Usage
 
