@@ -31,8 +31,9 @@ module.exports = class Normalize extends nmmes.Module {
         this.args.language = normalizeLanguage(this.args.language);
     }
     init() {
+        let _self = this;
         return new Promise(function(resolve, reject) {
-            if (this.args.language === 'Unknown') {
+            if (_self.args.language === 'Unknown') {
                 reject(new Error('Invalid language parameter provided. Use ISO 639-1 Code, ISO 639-2 Code, or full english name.'))
             } else {
                 resolve();

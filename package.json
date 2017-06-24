@@ -4,16 +4,18 @@
   "description": "NMMES normalize module",
   "main": "main.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "commit": "git add . && git commit -S && git push"
   },
   "repository": {
-      "type": "git",
-      "url": "https://github.com/NMMES/nmmes-module-normalize.git"
+    "type": "git",
+    "url": "https://github.com/NMMES/nmmes-module-normalize.git"
   },
   "author": "Ayrton Sparling",
   "license": "MIT",
   "dependencies": {
     "bluebird": "^3.5.0",
-    "chalk": "^1.1.3"
+    "chalk": "^1.1.3",
+    "nmmes-backend": "^0.0.1"
   }
 }
