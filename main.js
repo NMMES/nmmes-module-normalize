@@ -5,35 +5,18 @@ const Logger = nmmes.Logger;
 const chalk = require('chalk');
 const languages = require('./languages.json');
 
-/*
- * Arguments
- * normalizeAudioTitles - (boolean) Set to false if you do not want audio titles normalized
- * normalizeSubtitleTitles - (boolean) Set to false if you do not want subtitle titles normalized
- * force - (boolean) Set titles even if one already exists
- * setDefaultAudio - (boolean) Set to false if you do not want to set a default audio track
- * setDefaultSubtitle - (boolean) Set to false if you do not want to set a default subtitle track
- * language - (string) Language you would like to target for audio and subtitles
- */
-
 module.exports = class Normalize extends nmmes.Module {
     constructor(args) {
         super(require('./package.json'));
 
-        this.args = Object.assign({
-            normalizeAudioTitles: true,
-            normalizeSubtitleTitles: true,
-            setDefaultAudio: true,
-            setDefaultSubtitle: true,
-            force: false,
-            language: 'eng'
-        }, args);
+        this.options = Object.assign(nmmes.Module.defaults(Normalize), args);
 
-        this.args.language = normalizeLanguage(this.args.language);
+        this.options.language = normalizeLanguage(this.options.language);
     }
     init() {
         let _self = this;
         return new Promise(function(resolve, reject) {
-            if (_self.args.language === 'Unknown') {
+            if (_self.options.language === 'Unknown') {
                 reject(new Error('Invalid language parameter provided. Use ISO 639-1 Code, ISO 639-2 Code, or full english name.'))
             } else {
                 resolve();
@@ -53,9 +36,10 @@ module.exports = class Normalize extends nmmes.Module {
         }
         return title;
     }
-    executable(video, map) {
+    executable(map) {
         let _self = this;
-        let args = this.args;
+        let options = this.options;
+        let video = this.video;
         let changes = {
             streams: {}
         };
@@ -67,39 +51,72 @@ module.exports = class Normalize extends nmmes.Module {
             const keys = Object.keys(map.streams);
             for (let pos in map.streams) {
                 const index = keys[pos];
-                let stream = map.streams[index];
+                const stream = map.streams[index];
                 const input = stream.map.split(':')[0];
                 const metadata = video.input.metadata[input].streams[index];
 
                 changes.streams[index] = {
-                    ['metadata:s:' + pos]: []
+                    ['metadata:s:' + pos]: [],
+                    vf: []
                 };
 
-                // Skip all streams that are not audio or subtitles
-                if (metadata.codec_type !== 'audio' || metadata.codec_type !== 'subtitle') continue;
+                Logger.trace(`Processing ${metadata.codec_type} stream [${chalk.bold(stream.map)}] with language ${chalk.bold(getNormalizedStreamLanguage(metadata))}.`);
 
-                // Set normalized titles
-                if (((metadata.codec_type === 'audio' && args.normalizeAudioTitles) || (metadata.codec_type === 'subtitle' && args.normalizeSubtitleTitles)) && (!getStreamTitle(metadata) || args.force)) {
-                    const title = _self.normalizeStreamTitle(stream);
-                    changes.streams[index]['metadata:s:' + pos].push(`title=${title}`);
-                    Logger.debug(`Set title for ${metadata.codec_type} stream ${chalk.bold(getStreamTitle(metadata))} [${chalk.bold(stream.map)}] to ${chalk.bold(title)}`);
+                switch (metadata.codec_type) {
+                    case 'audio':
+                        {
+
+                            // Set normalized titles
+                            if (options['audio-titles'] && (!getStreamTitle(metadata) || options.force)) {
+                                const title = _self.normalizeStreamTitle(metadata);
+                                changes.streams[index]['metadata:s:' + pos].push(`title=${title}`);
+                                Logger.log(`Set title for ${metadata.codec_type} stream ${chalk.bold(getStreamTitle(metadata))} [${chalk.bold(stream.map)}] to ${chalk.bold(title)}.`);
+                            }
+
+                            // Attempt to set a default audio track
+                            if (options.language && options.language !== 'Unknown') {
+                                if (options.language === getNormalizedStreamLanguage(metadata) && !defaultAudioSet) {
+                                    changes.streams[index]['metadata:s:' + pos].push('DISPOSITION:default=1');
+                                    Logger.log(`Set default audio stream to [${chalk.bold(stream.map)}].`);
+                                    defaultAudioSet = true;
+                                } else {
+                                    changes.streams[index]['metadata:s:' + pos].push('DISPOSITION:default=0');
+                                }
+                            }
+
+                            break;
+                        }
+                    case 'subtitle':
+                        {
+
+                            // Set normalized titles
+                            if (options['subtitle-titles'] && (!getStreamTitle(metadata) || options.force)) {
+                                const title = _self.normalizeStreamTitle(metadata);
+                                changes.streams[index]['metadata:s:' + pos].push(`title=${title}`);
+                                Logger.log(`Set title for ${metadata.codec_type} stream ${chalk.bold(getStreamTitle(metadata))} [${chalk.bold(stream.map)}] to ${chalk.bold(title)}`);
+                            }
+
+                            break;
+                        }
+                    case 'video':
+                        {
+
+                            if (metadata.height > options.scale) {
+                                Logger.log(`Video ${metadata.width}x${metadata.height} is being downscaled to ${options.scale}p.`);
+                                changes.streams[index].vf.push(`scale=-1:${options.scale}`);
+                            }
+
+                            break;
+                        }
                 }
 
-                // Attempt to set a default audio track
-                if ((args.language && args.language !== 'Unknown') && (metadata.codec_type === 'audio' && args.setDefaultAudio)) {
-                    if (args.language === getNormalizedStreamLanguage(stream) && !defaultAudioSet) {
-                        changes.stream[index]['metadata:s:' + pos].push('DISPOSITION:default=1');
-                        defaultAudioSet = true;
-                    } else {
-                        changes.stream[index]['metadata:s:' + pos].push('DISPOSITION:default=0');
-                    }
-                }
+
 
             }
 
             // Attempt to set default subtitle only if a default audio was not set
             if (!defaultAudioSet) {
-                Logger.debug('No audio stream matching language', chalk.bold(args.language), 'found. No default audio set. Attempting subtitles...');
+                Logger.debug('No audio stream matching language', chalk.bold(options.language), 'found. No default audio set. Attempting subtitles...');
 
                 for (let pos in map.streams) {
                     const index = keys[pos];
@@ -109,9 +126,9 @@ module.exports = class Normalize extends nmmes.Module {
 
                     if (metadata.codec_type !== 'subtitle') continue;
 
-                    if ((args.language && args.language !== 'Unknown') && args.setDefaultSubtitle) {
-                        if (args.language === getNormalizedStreamLanguage(stream) && !defaultSubtitleSet) {
-                            if (getStreamTitle(stream) && !~getStreamTitle(stream).toLowerCase().indexOf('commentary')) {
+                    if (options.language && options.language !== 'Unknown') {
+                        if (options.language === getNormalizedStreamLanguage(metadata) && !defaultSubtitleSet) {
+                            if (getStreamTitle(metadata) && !~getStreamTitle(metadata).toLowerCase().indexOf('commentary')) {
                                 Logger.trace('Skipping eligble subtitle track because it is a commentary tack.');
                             } else {
                                 changes.stream[index]['metadata:s:' + pos].push('DISPOSITION:default=1');
@@ -125,11 +142,46 @@ module.exports = class Normalize extends nmmes.Module {
             }
 
             if (!defaultSubtitleSet)
-                Logger.debug('No subtitle stream matching language', chalk.bold(args.language), 'found. No default subtitle set.');
+                Logger.debug('No subtitle stream matching language', chalk.bold(options.language), 'found. No default subtitle set.');
 
             resolve(changes);
         });
     };
+
+    static options() {
+        return {
+            'audio-titles': {
+                default: true,
+                describe: 'Normalizes audio titles with language and format.',
+                type: 'boolean',
+                group: 'Audio:'
+            },
+            'subtitle-titles': {
+                default: true,
+                describe: 'Normalizes subtitle titles with language and format.',
+                type: 'boolean',
+                group: 'Subtitle:'
+            },
+            'force': {
+                default: false,
+                describe: 'Normalize titles even if one already exists for a specific stream.',
+                type: 'boolean',
+                group: 'Advanced:'
+            },
+            'language': {
+                default: 'eng',
+                describe: 'The native language used to select default audio and subtitles. You may use 3 letter or 2 letter ISO 639-2 Alpha-3/Alpha-2 codes or the full language name. Leave empty to disable this feature. Examples: [eng|en|English|jpn|ja|Japanese]',
+                type: 'string',
+                group: 'General:'
+            },
+            'scale': {
+                default: 0,
+                describe: 'Width videos should be down scaled to. Videos will always maintain original aspect ratio. Videos will not be scaled up. Use 0 to disable this feature. [Examples: 720, 480]',
+                type: 'number',
+                group: 'Video:'
+            },
+        };
+    }
 }
 
 function formatAudioChannels(numChannels) {
@@ -150,12 +202,12 @@ function formatAudioChannels(numChannels) {
     return string;
 }
 
-function getStreamTitle(stream) {
-    return stream.title || stream.tags ? stream.tags.title : undefined;
+function getStreamTitle(metadata) {
+    return metadata.title || metadata.tags ? metadata.tags.title : undefined;
 }
 
-function getNormalizedStreamLanguage(stream) {
-    let lang = stream.language || stream.tags ? stream.tags.language : undefined;
+function getNormalizedStreamLanguage(metadata) {
+    let lang = metadata.language || metadata.tags ? metadata.tags.language : undefined;
     return normalizeLanguage(lang);
 }
 
