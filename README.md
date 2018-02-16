@@ -10,52 +10,44 @@ A normalization module for nmmes-backend.
 
 [![NPM](https://nodei.co/npm/nmmes-module-normalize.png?compact=true)](https://nodei.co/npm/nmmes-module-normalize/)
 
-## Usage
-
-You will need to install the encoder module (`nmmes-module-encoder`) for this example.
-
-```javascript
-import {Video, Logger} from 'nmmes-backend';
-import encoder from 'nmmes-module-encoder';
-import normalize from 'nmmes-module-normalize';
-
-let video = new Video({
-    input: {
-        path: '/home/user/videos/video.mp4'
-    },
-    output: {
-        path: '/home/user/videos/encoded-video.mkv'
-    },
-    modules: [new normalize(), new encoder({
-        defaults: {
-            video: {
-                'c:{POS}': 'libx265'
-            }
-        }
-    })]
-});
-
-video.on('stop', function(err) {
-    if (err)
-        return Logger.error('Error encoding video', err);
-
-    Logger.log('Video encoding complete.');
-});
-
-video.start();
-```
-
 ## Options
 
-You may pass the normalize class an optional options object.
+The `--language` option sets the target language for normalization. The native-language option can parse [*ISO 639-1* and *ISO 639-2*](https://www.loc.gov/standards/iso639-2/php/code_list.php) (Ex: ja, jpn) Codes as well as the languages' full English name (Ex: Japanese, Russian, French).
 
-```javascript
-new normalize({
-    normalizeAudioTitles: true, // Should we normalize audio stream titles
-    normalizeSubtitleTitles: true,  // Should we normalize subtitle stream titles
-    setDefaultAudio: true, // Should we set the default audio track
-    setDefaultSubtitle: true, // Should we set the default subtitle track
-    force: false, // Should titles be normalized even if one already exists
-    language: 'eng' // Language to normalize against (en, eng, English all mean the same thing)
-});
-```
+Type: String<br>
+Default: eng
+
+---
+
+The `--audio-titles` option normalizes audio stream titles with the stream's language and format.
+
+Type: Boolean<br>
+Default: true
+
+---
+
+The `--subtitle-titles` option normalizes subtitle stream titles with the stream's language and format.
+
+Type: Boolean<br>
+Default: true
+
+---
+
+The `--force` option normalizes stream titles even if the stream already has a title.
+
+Type: Boolean<br>
+Default: false
+
+---
+
+The `--scale` option defines the width videos should be down scaled to. Videos will always maintain original aspect ratio. Videos will not be scaled up. Use 0 to disable this feature. [Examples: 720, 480].
+
+Type: Number<br>
+Default: 0
+
+---
+
+The `--autocrop-intervals` option attempts to crop off black bars on a video. Set to 0 to disable..
+
+Type: Number<br>
+Default: 0
