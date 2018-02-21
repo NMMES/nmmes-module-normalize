@@ -125,7 +125,7 @@ module.exports = class Normalize extends nmmes.Module {
 
                         }
 
-                        if (metadata.height > options.scale) {
+                        if (options.scale > 0 && metadata.height > options.scale) {
                             Logger.log(`Video is being downscaled to ${options.scale}p.`);
                             changes.streams[index].filter_complex[changes.streams[index].filter_complex.length - 1] += filter_complex_source;
                             changes.streams[index].filter_complex.push(`${filter_complex_source}scale=-2:${options.scale}`);
