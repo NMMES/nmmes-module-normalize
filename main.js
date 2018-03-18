@@ -5,6 +5,7 @@ const Logger = nmmes.Logger;
 const chalk = require('chalk');
 const languages = require('./languages.json');
 const ffmpeg = require('fluent-ffmpeg');
+const onDeath = require('death');
 
 module.exports = class Normalize extends nmmes.Module {
     constructor(args) {
@@ -37,6 +38,150 @@ module.exports = class Normalize extends nmmes.Module {
         }
         return title;
     }
+    normalizeAudioLevel(stream) {
+        const _self = this;
+        const video = this.video;
+        const loudnormRegex = /\[Parsed_loudnorm_.+?\] \n(\{(.|\n)+?\})/;
+
+        return new Promise((resolve, reject) => {
+            ffmpeg(video.input.path, {
+                    niceness: 19
+                })
+                .output('-')
+                .outputOptions('-map', stream.map)
+                .audioFilters([{
+                    filter: 'loudnorm',
+                    options: 'print_format=json'
+                }])
+                .format('null')
+                .on('start', (cmd) => {
+                    Logger.debug(`Normalizing audio stream ${stream.map}.`);
+                    Logger.trace('Query:', cmd);
+                })
+                .on('error', (err, stdout, stderr) => {
+                    return reject(err);
+                })
+                .on('end', (stdout, stderr) => {
+                    let matches = stderr.match(loudnormRegex);
+
+                    if (matches.length < 2)
+                        return reject(new Error("Invalid loudnorm output"));
+                    const json = JSON.parse(matches[1].replace(/\r?\n|\r|\t/g, " "));
+                    Logger.trace('Measured loudnorm:', json);
+                    return resolve(`loudnorm=measured_I=${json.input_i}:measured_LRA=${json.input_lra}:measured_TP=${json.input_tp}:measured_thresh=${json.input_thresh}`);
+                    delete _self.progress[stream.map];
+                })
+                .on('progress', function(progress) {
+                    let precent = progress.percent ? progress.percent.toFixed(1) : '~ ';
+                    _self.progress[stream.map] = chalk.yellow(precent + '%');
+                })
+                .run();
+        });
+    }
+    async normalizeStream(pos, map) {
+        const video = this.video;
+        const options = this.options;
+        const index = Object.keys(map.streams)[pos];
+        const stream = map.streams[index];
+        const input = stream.map.split(':')[0];
+        const metadata = video.input.metadata[input].streams[index];
+        let filter_complex_source = `[${input}:${index}]`;
+
+        let changes = {
+            ['metadata:s:' + pos]: [],
+            filter_complex: []
+        };
+
+        Logger.trace(`Processing ${metadata.codec_type} stream [${chalk.bold(stream.map)}] with language ${chalk.bold(getNormalizedStreamLanguage(metadata))}.`);
+
+        switch (metadata.codec_type) {
+            case 'audio':
+                {
+
+                    // Set normalized titles
+                    if (options['audio-titles'] && (!getStreamTitle(metadata) || options.force)) {
+                        const title = this.normalizeStreamTitle(metadata);
+                        changes['metadata:s:' + pos].push(`title=${title}`);
+                        Logger.log(`Set title for ${metadata.codec_type} stream ${chalk.bold(getStreamTitle(metadata))} [${chalk.bold(stream.map)}] to ${chalk.bold(title)}.`);
+                    }
+
+                    // Attempt to set a default audio track
+                    if (options.language && options.language !== 'Unknown') {
+                        if (options.language === getNormalizedStreamLanguage(metadata) && !this.defaultAudioSet) {
+                            changes['metadata:s:' + pos].push('DISPOSITION:default=1');
+                            Logger.log(`Set default audio stream to [${chalk.bold(stream.map)}].`);
+                            this.defaultAudioSet = true;
+                        } else {
+                            changes['metadata:s:' + pos].push('DISPOSITION:default=0');
+                        }
+                    }
+
+                    // Normalize audio level
+                    if (options['audio-level']) {
+                        changes.filter_complex[changes.filter_complex.length - 1] += filter_complex_source;
+                        // TODO: Measure in parallel
+                        changes.filter_complex.push(`${filter_complex_source}${await this.normalizeAudioLevel(stream)}`);
+                        filter_complex_source = `[${input}-${index}-loudnorm]`;
+                        changes['c:' + pos] = 'aac';
+                        changes[`q:` + pos] = 2;
+                    }
+
+                    break;
+                }
+            case 'subtitle':
+                {
+
+                    // Set normalized titles
+                    if (options['subtitle-titles'] && (!getStreamTitle(metadata) || options.force)) {
+                        const title = this.normalizeStreamTitle(metadata);
+                        changes['metadata:s:' + pos].push(`title=${title}`);
+                        Logger.log(`Set title for ${metadata.codec_type} stream ${chalk.bold(getStreamTitle(metadata))} [${chalk.bold(stream.map)}] to ${chalk.bold(title)}`);
+                    }
+
+                    break;
+                }
+            case 'video':
+                {
+
+                    if (options['autocrop-intervals']) {
+                        const intervalLength = video.input.metadata[input].format.duration / (options['autocrop-intervals'] + 1);
+                        Logger.debug(`Detecting possible crop for video stream ${chalk.bold(this.normalizeStreamTitle(metadata))} [${chalk.bold(stream.map)}]`);
+
+                        let promises = [];
+                        for (let i = options['autocrop-intervals']; i > 0; i--) {
+                            promises.push(this.detectCropAtInterval(i * intervalLength, stream.map));
+                        }
+
+                        let crop = await Promise.all(promises).then(measureCrop);
+
+                        Logger.trace(`Crop detected: ${crop.w}x${crop.h} (y:${crop.y}, x:${crop.x})`);
+                        if (crop.x > 0 || crop.y > 0) {
+                            Logger.log(`Cropping to ${crop.w}x${crop.h}.`);
+                            changes.filter_complex[changes.filter_complex.length - 1] += filter_complex_source;
+                            changes.filter_complex.push(`${filter_complex_source}crop=${crop.w}:${crop.h}:${crop.x}:${crop.y}`);
+                            filter_complex_source = `[${input}-${index}-crop]`;
+                        } else {
+                            Logger.debug('No cropping necessary.');
+                        }
+                        // onCancel(cropDetection.cancel.bind(cropDetection));
+
+                    }
+
+                    if (options.scale > 0 && metadata.height > options.scale) {
+                        Logger.log(`Video is being downscaled to ${options.scale}p.`);
+                        changes.filter_complex[changes.filter_complex.length - 1] += filter_complex_source;
+                        changes.filter_complex.push(`${filter_complex_source}scale=-2:${options.scale}`);
+                        filter_complex_source = `[${input}-${index}-scale]`;
+                    }
+
+                    break;
+                }
+        }
+
+        changes.filter_complex = changes.filter_complex.join(';');
+
+        return [index, changes];
+    }
     async executable(map) {
         let options = this.options;
         let video = this.video;
@@ -44,104 +189,31 @@ module.exports = class Normalize extends nmmes.Module {
             streams: {}
         };
 
-        let defaultAudioSet = false;
-        let defaultSubtitleSet = false;
-
-        const keys = Object.keys(map.streams);
+        let promises = [];
+        this.progress = {};
         for (let pos in map.streams) {
-            const index = keys[pos];
-            const stream = map.streams[index];
-            const input = stream.map.split(':')[0];
-            const metadata = video.input.metadata[input].streams[index];
-            let filter_complex_source = `[${input}:${index}]`;
-
-            changes.streams[index] = {
-                ['metadata:s:' + pos]: [],
-                filter_complex: []
-            };
-
-            Logger.trace(`Processing ${metadata.codec_type} stream [${chalk.bold(stream.map)}] with language ${chalk.bold(getNormalizedStreamLanguage(metadata))}.`);
-
-            switch (metadata.codec_type) {
-                case 'audio':
-                    {
-
-                        // Set normalized titles
-                        if (options['audio-titles'] && (!getStreamTitle(metadata) || options.force)) {
-                            const title = this.normalizeStreamTitle(metadata);
-                            changes.streams[index]['metadata:s:' + pos].push(`title=${title}`);
-                            Logger.log(`Set title for ${metadata.codec_type} stream ${chalk.bold(getStreamTitle(metadata))} [${chalk.bold(stream.map)}] to ${chalk.bold(title)}.`);
-                        }
-
-                        // Attempt to set a default audio track
-                        if (options.language && options.language !== 'Unknown') {
-                            if (options.language === getNormalizedStreamLanguage(metadata) && !defaultAudioSet) {
-                                changes.streams[index]['metadata:s:' + pos].push('DISPOSITION:default=1');
-                                Logger.log(`Set default audio stream to [${chalk.bold(stream.map)}].`);
-                                defaultAudioSet = true;
-                            } else {
-                                changes.streams[index]['metadata:s:' + pos].push('DISPOSITION:default=0');
-                            }
-                        }
-
-                        break;
-                    }
-                case 'subtitle':
-                    {
-
-                        // Set normalized titles
-                        if (options['subtitle-titles'] && (!getStreamTitle(metadata) || options.force)) {
-                            const title = this.normalizeStreamTitle(metadata);
-                            changes.streams[index]['metadata:s:' + pos].push(`title=${title}`);
-                            Logger.log(`Set title for ${metadata.codec_type} stream ${chalk.bold(getStreamTitle(metadata))} [${chalk.bold(stream.map)}] to ${chalk.bold(title)}`);
-                        }
-
-                        break;
-                    }
-                case 'video':
-                    {
-
-                        if (options['autocrop-intervals']) {
-                            const intervalLength = video.input.metadata[input].format.duration / (options['autocrop-intervals'] + 1);
-                            Logger.debug(`Detecting possible crop for video stream ${chalk.bold(this.normalizeStreamTitle(metadata))} [${chalk.bold(stream.map)}]`);
-
-                            let promises = [];
-                            for (let i = options['autocrop-intervals']; i > 0; i--) {
-                                promises.push(this.detectCropAtInterval(i * intervalLength, stream.map));
-                            }
-
-                            let crop = await Promise.all(promises).then(measureCrop);
-
-                            Logger.trace(`Crop detected: ${crop.w}x${crop.h} (y:${crop.y}, x:${crop.x})`);
-                            if (crop.x > 0 || crop.y > 0) {
-                                Logger.log(`Cropping to ${crop.w}x${crop.h}.`);
-                                changes.streams[index].filter_complex[changes.streams[index].filter_complex.length - 1] += filter_complex_source;
-                                changes.streams[index].filter_complex.push(`${filter_complex_source}crop=${crop.w}:${crop.h}:${crop.x}:${crop.y}`);
-                                filter_complex_source = `[${input}-${index}-crop]`;
-                            } else {
-                                Logger.debug('No cropping necessary.');
-                            }
-                            // onCancel(cropDetection.cancel.bind(cropDetection));
-
-                        }
-
-                        if (options.scale > 0 && metadata.height > options.scale) {
-                            Logger.log(`Video is being downscaled to ${options.scale}p.`);
-                            changes.streams[index].filter_complex[changes.streams[index].filter_complex.length - 1] += filter_complex_source;
-                            changes.streams[index].filter_complex.push(`${filter_complex_source}scale=-2:${options.scale}`);
-                            filter_complex_source = `[${input}-${index}-scale]`;
-                        }
-
-                        break;
-                    }
-            }
-
-            changes.streams[index].filter_complex = changes.streams[index].filter_complex.join(';');
-
+            promises.push(this.normalizeStream(pos, map));
+        }
+        const progressUpdate = setInterval(() => {
+            if (Object.keys(this.progress).length < 1)
+                return;
+            Logger.info({
+                __tracer_ops: true,
+                replace: true,
+                id: 'loudnorm'
+            }, '[' + chalk.yellow.bold('FFMPEG') + ']', `Normalizing streams: [` + Object.values(this.progress).join('] [') + ']');
+        }, 2000);
+        onDeath(() => {
+            clearInterval(progressUpdate);
+        });
+        for (const [index, change] of await Promise.all(promises)) {
+            clearInterval(progressUpdate);
+            merge(changes.streams[index], change);
         }
 
+        let defaultSubtitleSet = false;
         // Attempt to set default subtitle only if a default audio was not set
-        if (!defaultAudioSet) {
+        if (!this.defaultAudioSet) {
             Logger.debug('No audio stream matching language', chalk.bold(options.language), 'found. No default audio set. Attempting subtitles...');
 
             for (let pos in map.streams) {
@@ -213,6 +285,12 @@ module.exports = class Normalize extends nmmes.Module {
 
     static options() {
         return {
+            'audio-level': {
+                default: false,
+                describe: 'Normalizes audio level with EBU R128 loudness normalization.',
+                type: 'boolean',
+                group: 'Audio:'
+            },
             'audio-titles': {
                 default: true,
                 describe: 'Normalizes audio titles with language and format.',
@@ -317,4 +395,13 @@ function normalizeLanguage(lang) {
         default:
             return lang.capitalize() || "Unknown";
     }
+}
+
+function momentizeTimemark(timemark) {
+
+    let hours = parseInt(timemark.substring(0, timemark.indexOf(':')), 10);
+    let minutes = parseInt(timemark.substring(timemark.indexOf(':') + 1, timemark.lastIndexOf(':')), 10);
+    let seconds = parseFloat(timemark.substr(timemark.lastIndexOf(':') + 1));
+
+    return moment.duration().add(hours, 'h').add(minutes, 'm').add(seconds, 's');
 }
