@@ -217,9 +217,10 @@ module.exports = class Normalize extends nmmes.Module {
         if (!this.defaultAudioSet) {
             Logger.debug('No audio stream matching language', chalk.bold(options.language), 'found. No default audio set. Attempting subtitles...');
 
+            const keys = Object.keys(map.streams);
             for (let pos in map.streams) {
                 const index = keys[pos];
-                let stream = map.streams[index];
+                const stream = map.streams[index];
                 const input = stream.map.split(':')[0];
                 const metadata = video.input.metadata[input].streams[index];
 
