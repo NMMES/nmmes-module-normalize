@@ -6,6 +6,7 @@ const chalk = require('chalk');
 const languages = require('./languages.json');
 const ffmpeg = require('fluent-ffmpeg');
 const onDeath = require('death');
+const merge = require('lodash.merge');
 
 module.exports = class Normalize extends nmmes.Module {
     constructor(args) {
