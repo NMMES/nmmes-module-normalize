@@ -9,8 +9,9 @@ const onDeath = require('death');
 const merge = require('lodash.merge');
 
 module.exports = class Normalize extends nmmes.Module {
-    constructor(args) {
+    constructor(args, logger = Logger) {
         super(require('./package.json'));
+        this.logger = logger;
 
         this.options = Object.assign(nmmes.Module.defaults(Normalize), args);
 
@@ -56,8 +57,8 @@ module.exports = class Normalize extends nmmes.Module {
                 }])
                 .format('null')
                 .on('start', (cmd) => {
-                    Logger.debug(`Normalizing audio stream ${stream.map}.`);
-                    Logger.trace('Query:', cmd);
+                    _self.logger.debug(`Normalizing audio stream ${stream.map}.`);
+                    _self.logger.trace('Query:', cmd);
                 })
                 .on('error', (err, stdout, stderr) => {
                     return reject(err);
@@ -68,7 +69,7 @@ module.exports = class Normalize extends nmmes.Module {
                     if (matches.length < 2)
                         return reject(new Error("Invalid loudnorm output"));
                     const json = JSON.parse(matches[1].replace(/\r?\n|\r|\t/g, " "));
-                    Logger.trace('Measured loudnorm:', json);
+                    _self.logger.trace('Measured loudnorm:', json);
                     return resolve(`loudnorm=measured_I=${json.input_i}:measured_LRA=${json.input_lra}:measured_TP=${json.input_tp}:measured_thresh=${json.input_thresh}`);
                     delete _self.progress[stream.map];
                 })
@@ -93,7 +94,7 @@ module.exports = class Normalize extends nmmes.Module {
             filter_complex: []
         };
 
-        Logger.trace(`Processing ${metadata.codec_type} stream [${chalk.bold(stream.map)}] with language ${chalk.bold(getNormalizedStreamLanguage(metadata))}.`);
+        this.logger.trace(`Processing ${metadata.codec_type} stream [${chalk.bold(stream.map)}] with language ${chalk.bold(getNormalizedStreamLanguage(metadata))}.`);
 
         switch (metadata.codec_type) {
             case 'audio':
@@ -103,14 +104,14 @@ module.exports = class Normalize extends nmmes.Module {
                     if (options['audio-titles'] && (!getStreamTitle(metadata) || options.force)) {
                         const title = this.normalizeStreamTitle(metadata);
                         changes['metadata:s:' + pos].push(`title=${title}`);
-                        Logger.log(`Set title for ${metadata.codec_type} stream ${chalk.bold(getStreamTitle(metadata))} [${chalk.bold(stream.map)}] to ${chalk.bold(title)}.`);
+                        this.logger.log(`Set title for ${metadata.codec_type} stream ${chalk.bold(getStreamTitle(metadata))} [${chalk.bold(stream.map)}] to ${chalk.bold(title)}.`);
                     }
 
                     // Attempt to set a default audio track
                     if (options.language && options.language !== 'Unknown') {
                         if (options.language === getNormalizedStreamLanguage(metadata) && !this.defaultAudioSet) {
                             changes['metadata:s:' + pos].push('DISPOSITION:default=1');
-                            Logger.log(`Set default audio stream to [${chalk.bold(stream.map)}].`);
+                            this.logger.log(`Set default audio stream to [${chalk.bold(stream.map)}].`);
                             this.defaultAudioSet = true;
                         } else {
                             changes['metadata:s:' + pos].push('DISPOSITION:default=0');
@@ -136,7 +137,7 @@ module.exports = class Normalize extends nmmes.Module {
                     if (options['subtitle-titles'] && (!getStreamTitle(metadata) || options.force)) {
                         const title = this.normalizeStreamTitle(metadata);
                         changes['metadata:s:' + pos].push(`title=${title}`);
-                        Logger.log(`Set title for ${metadata.codec_type} stream ${chalk.bold(getStreamTitle(metadata))} [${chalk.bold(stream.map)}] to ${chalk.bold(title)}`);
+                        this.logger.log(`Set title for ${metadata.codec_type} stream ${chalk.bold(getStreamTitle(metadata))} [${chalk.bold(stream.map)}] to ${chalk.bold(title)}`);
                     }
 
                     break;
@@ -146,7 +147,7 @@ module.exports = class Normalize extends nmmes.Module {
 
                     if (options['autocrop-intervals']) {
                         const intervalLength = video.input.metadata[input].format.duration / (options['autocrop-intervals'] + 1);
-                        Logger.debug(`Detecting possible crop for video stream ${chalk.bold(this.normalizeStreamTitle(metadata))} [${chalk.bold(stream.map)}]`);
+                        this.logger.debug(`Detecting possible crop for video stream ${chalk.bold(this.normalizeStreamTitle(metadata))} [${chalk.bold(stream.map)}]`);
 
                         let promises = [];
                         for (let i = options['autocrop-intervals']; i > 0; i--) {
@@ -155,21 +156,21 @@ module.exports = class Normalize extends nmmes.Module {
 
                         let crop = await Promise.all(promises).then(measureCrop);
 
-                        Logger.trace(`Crop detected: ${crop.w}x${crop.h} (y:${crop.y}, x:${crop.x})`);
+                        this.logger.trace(`Crop detected: ${crop.w}x${crop.h} (y:${crop.y}, x:${crop.x})`);
                         if (crop.x > 0 || crop.y > 0) {
-                            Logger.log(`Cropping to ${crop.w}x${crop.h}.`);
+                            this.logger.log(`Cropping to ${crop.w}x${crop.h}.`);
                             changes.filter_complex[changes.filter_complex.length - 1] += filter_complex_source;
                             changes.filter_complex.push(`${filter_complex_source}crop=${crop.w}:${crop.h}:${crop.x}:${crop.y}`);
                             filter_complex_source = `[${input}-${index}-crop]`;
                         } else {
-                            Logger.debug('No cropping necessary.');
+                            this.logger.debug('No cropping necessary.');
                         }
                         // onCancel(cropDetection.cancel.bind(cropDetection));
 
                     }
 
                     if (options.scale > 0 && metadata.height > options.scale) {
-                        Logger.log(`Video is being downscaled to ${options.scale}p.`);
+                        this.logger.log(`Video is being downscaled to ${options.scale}p.`);
                         changes.filter_complex[changes.filter_complex.length - 1] += filter_complex_source;
                         changes.filter_complex.push(`${filter_complex_source}scale=-2:${options.scale}`);
                         filter_complex_source = `[${input}-${index}-scale]`;
@@ -198,7 +199,7 @@ module.exports = class Normalize extends nmmes.Module {
         const progressUpdate = setInterval(() => {
             if (Object.keys(this.progress).length < 1)
                 return;
-            Logger.info({
+            this.logger.info({
                 __tracer_ops: true,
                 replace: true,
                 id: 'loudnorm'
@@ -215,7 +216,7 @@ module.exports = class Normalize extends nmmes.Module {
         let defaultSubtitleSet = false;
         // Attempt to set default subtitle only if a default audio was not set
         if (!this.defaultAudioSet) {
-            Logger.debug('No audio stream matching language', chalk.bold(options.language), 'found. No default audio set. Attempting subtitles...');
+            this.logger.debug('No audio stream matching language', chalk.bold(options.language), 'found. No default audio set. Attempting subtitles...');
 
             const keys = Object.keys(map.streams);
             for (let pos in map.streams) {
@@ -229,7 +230,7 @@ module.exports = class Normalize extends nmmes.Module {
                 if (options.language && options.language !== 'Unknown') {
                     if (options.language === getNormalizedStreamLanguage(metadata) && !defaultSubtitleSet) {
                         if (getStreamTitle(metadata) && !~getStreamTitle(metadata).toLowerCase().indexOf('commentary')) {
-                            Logger.trace('Skipping eligble subtitle track because it is a commentary tack.');
+                            this.logger.trace('Skipping eligble subtitle track because it is a commentary tack.');
                         } else {
                             changes.streams[index]['metadata:s:' + pos].push('DISPOSITION:default=1');
                             defaultSubtitleSet = true;
@@ -242,7 +243,7 @@ module.exports = class Normalize extends nmmes.Module {
         }
 
         if (!defaultSubtitleSet)
-            Logger.debug('No subtitle stream matching language', chalk.bold(options.language), 'found. No default subtitle set.');
+            this.logger.debug('No subtitle stream matching language', chalk.bold(options.language), 'found. No default subtitle set.');
 
         return changes;
     };
@@ -260,7 +261,7 @@ module.exports = class Normalize extends nmmes.Module {
 
             command
                 .on('start', function(commandLine) {
-                    Logger.trace('[FFMPEG] Query:', commandLine);
+                    _self.logger.trace('[FFMPEG] Query:', commandLine);
                 })
                 .on('end', function(stdout, stderr) {
                     // _self.emit('statusUpdate', `Completed: ${++_self.completedIntervals}/${_self.options['autocrop-intervals']}`);
