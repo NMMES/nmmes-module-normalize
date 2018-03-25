@@ -1,6 +1,6 @@
 {
     "name": "nmmes-module-normalize",
-    "version": "0.0.3",
+    "version": "0.0.4",
     "description": "NMMES normalize module",
     "main": "main.js",
     "scripts": {
