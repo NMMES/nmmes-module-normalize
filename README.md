@@ -19,6 +19,13 @@ Default: eng
 
 ---
 
+The `--audio-levels` option normalizes audio stream levels with EBU R128 loudness normalization.
+
+Type: Boolean<br>
+Default: true
+
+---
+
 The `--audio-titles` option normalizes audio stream titles with the stream's language and format.
 
 Type: Boolean<br>

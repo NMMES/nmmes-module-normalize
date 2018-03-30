@@ -1,7 +1,6 @@
 'use strict';
 
 const nmmes = require('nmmes-backend');
-const Logger = nmmes.Logger;
 const chalk = require('chalk');
 const languages = require('./languages.json');
 const ffmpeg = require('fluent-ffmpeg');
@@ -9,9 +8,8 @@ const onDeath = require('death');
 const merge = require('lodash.merge');
 
 module.exports = class Normalize extends nmmes.Module {
-    constructor(args, logger = Logger) {
-        super(require('./package.json'));
-        this.logger = logger;
+    constructor(args, logger) {
+        super(require('./package.json'), logger);
 
         this.options = Object.assign(nmmes.Module.defaults(Normalize), args);
 
@@ -119,9 +117,8 @@ module.exports = class Normalize extends nmmes.Module {
                     }
 
                     // Normalize audio level
-                    if (options['audio-level']) {
+                    if (options['audio-levels']) {
                         changes.filter_complex[changes.filter_complex.length - 1] += filter_complex_source;
-                        // TODO: Measure in parallel
                         changes.filter_complex.push(`${filter_complex_source}${await this.normalizeAudioLevel(stream)}`);
                         filter_complex_source = `[${input}-${index}-loudnorm]`;
                         changes['c:' + pos] = 'aac';
@@ -144,6 +141,8 @@ module.exports = class Normalize extends nmmes.Module {
                 }
             case 'video':
                 {
+                    if (metadata.disposition && metadata.disposition.attached_pic)
+                        break;
 
                     if (options['autocrop-intervals']) {
                         const intervalLength = video.input.metadata[input].format.duration / (options['autocrop-intervals'] + 1);
@@ -288,7 +287,7 @@ module.exports = class Normalize extends nmmes.Module {
 
     static options() {
         return {
-            'audio-level': {
+            'audio-levels': {
                 default: false,
                 describe: 'Normalizes audio level with EBU R128 loudness normalization.',
                 type: 'boolean',
