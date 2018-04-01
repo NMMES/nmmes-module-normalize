@@ -192,7 +192,10 @@ module.exports = class Normalize extends nmmes.Module {
 
         let promises = [];
         this.progress = {};
+        const keys = Object.keys(map.streams);
         for (let pos in map.streams) {
+            const index = keys[pos];
+            changes.streams[index] = {};
             promises.push(this.normalizeStream(pos, map));
         }
         const progressUpdate = setInterval(() => {
@@ -208,16 +211,15 @@ module.exports = class Normalize extends nmmes.Module {
             clearInterval(progressUpdate);
         });
         for (const [index, change] of await Promise.all(promises)) {
-            clearInterval(progressUpdate);
             merge(changes.streams[index], change);
         }
+        clearInterval(progressUpdate);
 
         let defaultSubtitleSet = false;
         // Attempt to set default subtitle only if a default audio was not set
         if (!this.defaultAudioSet) {
             this.logger.debug('No audio stream matching language', chalk.bold(options.language), 'found. No default audio set. Attempting subtitles...');
 
-            const keys = Object.keys(map.streams);
             for (let pos in map.streams) {
                 const index = keys[pos];
                 const stream = map.streams[index];
