@@ -1,14 +1,20 @@
 # NMMES-module-normalize
 
-A normalization module for nmmes-backend.
+A normalization module for [nmmes-backend](https://github.com/NMMES/nmmes-backend).
 
-## Dependencies
-
-- [nmmes-backend](https://github.com/NMMES/nmmes-backend) - Required in order to run this module.
+## Features
+- Normalize audio levels via the ffmpeg loudnorm audio filter.
+- Set default audio stream based on language.
+- Set default subtitle stream if an audio stream with the target language is not found.
+- Create stream titles if they don't already exist.
+- Automatically crop off black edges.
+- Downscale video if larger than specified height.
 
 ## Installation
 
 [![NPM](https://nodei.co/npm/nmmes-module-normalize.png?compact=true)](https://nodei.co/npm/nmmes-module-normalize/)
+
+See https://github.com/NMMES/nmmes-cli/wiki/Modules for additional instructions.
 
 ## Options
 
@@ -47,14 +53,14 @@ Default: false
 
 ---
 
-The `--scale` option defines the width videos should be down scaled to. Videos will always maintain original aspect ratio. Videos will not be scaled up. Use 0 to disable this feature. [Examples: 720, 480].
+The `--scale` option defines the height videos should be down scaled to. Videos will always maintain original aspect ratio. Videos will not be scaled up. Use 0 to disable this feature. [Examples: 720, 480].
 
 Type: Number<br>
 Default: 0
 
 ---
 
-The `--autocrop-intervals` option attempts to crop off black bars on a video. Set to 0 to disable..
+The `--autocrop-intervals` option attempts to crop off black bars on a video. Set to 0 to disable.
 
 Type: Number<br>
-Default: 0
+Default: 12
