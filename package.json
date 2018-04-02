@@ -17,6 +17,6 @@
         "chalk": "^2.3.2",
         "death": "^1.1.0",
         "lodash.merge": "^4.6.1",
-        "nmmes-backend": "0.0.8"
+        "nmmes-backend": "0.0.10"
     }
 }
