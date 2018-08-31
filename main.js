@@ -9,7 +9,7 @@ const merge = require('lodash.merge');
 
 module.exports = class Normalize extends nmmes.Module {
     constructor(args, logger) {
-        super(require('./package.json'), logger);
+        super(require('./package.json'), {}, logger);
 
         this.options = Object.assign(nmmes.Module.defaults(Normalize), args);
 
